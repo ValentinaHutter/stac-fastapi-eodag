@@ -53,6 +53,9 @@ class CustomCoreClient(AsyncBaseCoreClient):
         federation_dict = {fb: get_federation_backend_dict(request, fb) for fb in federation_backends}
         landing_page["federation"] = federation_dict
 
-        landing_page["stac_extensions"].append(self.stac_metadata_model._conformance_classes["FederationExtension"])
+        federation_extension_url = self.stac_metadata_model._conformance_classes.get("FederationExtension")
+        if federation_extension_url is not None:
+            landing_page["stac_extensions"].append(federation_extension_url)
+        landing_page["stac_extensions"] = [e for e in landing_page["stac_extensions"] if e is not None]
 
         return landing_page
