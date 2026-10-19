@@ -197,8 +197,8 @@ async def test_items_response(request_valid, defaults):
 
 async def test_assets_with_different_download_base_url(request_valid, defaults):
     """Domain for download links should be as configured in settings"""
-    settings = get_settings()
-    settings.download_base_url = "http://otherserver/"
+    download_base_url = get_settings().download_base_url
+    get_settings().download_base_url = "http://otherserver/"
     resp_json = await request_valid(
         f"search?collections={defaults.collection}",
     )
@@ -210,6 +210,9 @@ async def test_assets_with_different_download_base_url(request_valid, defaults):
         res[0]["assets"]["asset1"]["href"]
         == f"http://otherserver/data/cop_dataspace/{res[0]['collection']}/{res[0]['id']}/asset1"
     )
+
+    # restore the original download_base_url setting
+    get_settings().download_base_url = download_base_url
 
 
 async def test_no_invalid_symbols_in_urls(request_valid, defaults, mock_search_result):
@@ -248,6 +251,34 @@ async def test_downloadlink_excluded_when_parquet_asset(request_valid, defaults,
 
     # Second product has no parquet asset and is ONLINE, so downloadLink should be present
     assert "downloadLink" in res[1]["assets"], "downloadLink should be present when no parquet assets"
+
+
+async def test_downloadlink_present_when_eodag_download_link_missing(request_valid, defaults, mock_search_result):
+    """downloadLink should be present when eodag:download_link is missing"""
+    search_result = mock_search_result
+
+    # Remove eodag:download_link from first product
+    search_result[0].properties.pop("eodag:download_link")
+
+    # Make sure second product is ONLINE to have assets
+    search_result[1].properties["order:status"] = ONLINE_STATUS
+
+    resp_json = await request_valid(f"search?collections={defaults.collection}", search_result=search_result)
+    res = resp_json["features"]
+
+    # First product does *not* have eodag:download_link, but downloadLink should still be created
+    assert "downloadLink" in res[0]["assets"], "downloadLink should be present also when eodag:download_link is missing"
+    assert (
+        res[0]["assets"]["downloadLink"]["href"]
+        == f"http://testserver/data/cop_dataspace/{res[0]['collection']}/{res[0]['id']}/downloadLink"
+    )
+
+    # Second product has eodag:download_link, so downloadLink should be present
+    assert "downloadLink" in res[1]["assets"], "downloadLink should be present when eodag:download_link exists"
+    assert (
+        res[1]["assets"]["downloadLink"]["href"]
+        == f"http://testserver/data/cop_dataspace/{res[1]['collection']}/{res[1]['id']}/downloadLink"
+    )
 
 
 async def test_not_found(request_not_found):
@@ -372,6 +403,23 @@ async def test_filter_extension_items(request_valid, defaults, mock_search):
             validate=True,
             **expected_kwargs,
         ),
+    )
+
+
+async def test_filter_extension_items_json_in_get_rejected(app_client, defaults):
+    """Search through /items endpoint with JSON in GET filter should return a clear 400 error."""
+    filter_value = "%7B%22ecmwf:location%22%3A%7B%22longitude%22%3A100%2C%22latitude%22%3A0%7D%7D"
+    response = await app_client.get(
+        f"/collections/{defaults.collection}/items?bbox={defaults.bbox_csv}&filter={filter_value}"
+    )
+
+    assert response.status_code == 400
+    resp_json = response.json()
+    assert resp_json["code"] == "400"
+    assert resp_json["description"] == (
+        'The "filter" parameter provided in a GET request contains a JSON/dictionary object, '
+        "which is not supported in the query string. Please use a POST request with a JSON body "
+        "for this type of filter."
     )
 
 
@@ -521,6 +569,34 @@ async def test_ids_post_search(request_valid, defaults):
             {
                 "id": "bar",
                 "collection": defaults.collection,
+                "validate": True,
+            },
+        ],
+    )
+
+
+async def test_ids_post_search_keeps_provider_from_query(request_valid, defaults):
+    """POST ids search must keep provider parsed from query federation:backends."""
+    await request_valid(
+        "search",
+        method="POST",
+        post_data={
+            "collections": [defaults.collection],
+            "ids": ["foo", "bar"],
+            "query": {"federation:backends": {"eq": "cop_dataspace"}},
+        },
+        search_call_count=2,
+        expected_search_kwargs=[
+            {
+                "id": "foo",
+                "collection": defaults.collection,
+                "provider": "cop_dataspace",
+                "validate": True,
+            },
+            {
+                "id": "bar",
+                "collection": defaults.collection,
+                "provider": "cop_dataspace",
                 "validate": True,
             },
         ],

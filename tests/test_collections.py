@@ -28,6 +28,7 @@ async def test_collection(
     defaults,
     mock_stac_discover_queryables,
     mock_token_authenticate,
+    mock_aws_authenticate,
     mock_oidc_refresh_token_base_init,
     mock_oidc_token_exchange_auth_authenticate,
 ):
@@ -38,6 +39,39 @@ async def test_collection(
     assert len(result["summaries"]["federation:backends"]) > 0
     for link in result["links"]:
         assert link["rel"] in ["self", "items", "http://www.opengis.net/def/rel/ogc/1.0/queryables"]
+
+
+async def test_collection_merges_external_stac_collection(app_client, mock_list_collections, app, mocker):
+    """A collection response should merge its external STAC collection metadata."""
+    collection = Collection(
+        id="S2_MSI_L1C",
+        title="EODAG title",
+        description="EODAG description",
+        keywords=["eodag-keyword"],
+        platform="Sentinel-2",
+    )
+    mock_list_collections.return_value = CollectionsList([collection])
+    mocker.patch.dict(
+        app.state.ext_stac_collections,
+        {
+            "S2_MSI_L1C": {
+                "title": "External title",
+                "description": "External description",
+                "keywords": ["external-keyword"],
+                "summaries": {"platform": ["Sentinel-2", "Sentinel-2B"]},
+            }
+        },
+    )
+
+    response = await app_client.get("/collections/S2_MSI_L1C")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["title"] == "External title"
+    assert result["description"] == "External description"
+    assert result["keywords"] == ["eodag-keyword", "external-keyword"]
+    assert result["summaries"]["platform"] == ["Sentinel-2", "Sentinel-2B"]
+    assert result["summaries"]["federation:backends"]
 
 
 async def test_list_collections(app_client, mock_list_collections):

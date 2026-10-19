@@ -71,6 +71,9 @@ async def test_collection_queryables_with_filters(mock_list_queryables, mock_lis
         # first call with only provider and collection
         args, kwargs = call_args_list[0]
         assert params_first_call == kwargs
+        if params == params_first_call:
+            assert len(call_args_list) == 1
+            return
         # second call with all the parameters
         args, kwargs = call_args_list[1]
         assert params == kwargs
@@ -263,6 +266,7 @@ async def test_default_in_collection_queryables(
     app_client,
     mock_stac_discover_queryables,
     mock_token_authenticate,
+    mock_aws_authenticate,
     mock_oidc_refresh_token_base_init,
     mock_oidc_token_exchange_auth_authenticate,
 ):
